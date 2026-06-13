@@ -150,14 +150,14 @@ func TestGetOIDCClaimsFromToken(t *testing.T) {
 
 	t.Run("valid token returns verified claims", func(t *testing.T) {
 		tok := m.token(t, idTokenClaims{
-			Subject: "kc-sub-123", Email: "alice@hydo.ch", EmailVerified: true, Name: "Alice",
+			Subject: "kc-sub-123", Email: "alice@example.com", EmailVerified: true, Name: "Alice",
 		})
 
 		claims, err := getOIDCClaimsFromToken(ctx, cfg, tok)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if claims.Email != "alice@hydo.ch" || claims.Sub != "kc-sub-123" ||
+		if claims.Email != "alice@example.com" || claims.Sub != "kc-sub-123" ||
 			!claims.EmailVerified || claims.Name != "Alice" {
 			t.Fatalf("unexpected claims: %+v", claims)
 		}

@@ -58,7 +58,7 @@ func TestUpsertOIDCUserFromToken(t *testing.T) {
 			t.Fatalf("random suffix: %v", err)
 		}
 		// CreateUser stores emails lowercased, so use a lowercase address.
-		email := strings.ToLower("oidc-" + suffix + "@hydo.ch")
+		email := strings.ToLower("oidc-" + suffix + "@example.com")
 
 		// First login: user does not exist yet -> CreateUser with provider="oidc".
 		tok := m.token(t, idTokenClaims{
