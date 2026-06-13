@@ -1,0 +1,37 @@
+# Builds the OIDC-enabled Hatchet dashboard image (stock v0.89.0 + PR hatchet-dev#3607)
+# and pushes it to this project's container registry:
+#
+#   registry.gitlab.com/hypodossier/hyhatchet/hatchet-dashboard:oidc89
+#
+# Only the dashboard (the hatchet-api binary + frontend, which carry the OIDC
+# changes) is built here. The engine/migrate/admin images stay stock
+# ghcr.io/hatchet-dev/hatchet/...:v0.89.0.
+
+stages: [build]
+
+build-dashboard:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_HOST: "tcp://docker:2376"
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+    DOCKER_BUILDKIT: "1"
+    IMG_TAG: "oidc89"
+    API_IMG: "$CI_REGISTRY_IMAGE/hatchet-api:$IMG_TAG"
+    DASH_IMG: "$CI_REGISTRY_IMAGE/hatchet-dashboard:$IMG_TAG"
+  timeout: 1h
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    # 1. hatchet-api binary (contains the OIDC handlers) — intermediate base
+    - docker build -f build/package/servers.dockerfile --build-arg SERVER_TARGET=api -t "$API_IMG" .
+    # 2. dashboard = api binary + rebuilt frontend (OIDC button) behind nginx
+    - docker build -f build/package/dashboard.dockerfile --build-arg HATCHET_API_IMAGE="$API_IMG" -t "$DASH_IMG" .
+    - docker push "$DASH_IMG"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'   # build on push to default branch
+    - if: '$CI_PIPELINE_SOURCE == "web"'             # and via the "Run pipeline" button
