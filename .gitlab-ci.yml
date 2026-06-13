@@ -11,6 +11,7 @@ stages: [build]
 
 build-dashboard:
   stage: build
+  tags: [hetzner-gitlab-runner]
   image: docker:27
   services:
     - docker:27-dind
