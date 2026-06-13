@@ -1,15 +1,17 @@
-# Builds the OIDC-enabled Hatchet dashboard image (stock v0.89.0 + PR hatchet-dev#3607)
-# and pushes it to this project's container registry:
+# Builds the OIDC-enabled Hatchet images (stock v0.89.0 + PR hatchet-dev#3607)
+# and pushes them to this project's container registry:
 #
-#   registry.gitlab.com/hypodossier/hyhatchet/hatchet-dashboard:oidc89
+#   registry.gitlab.com/hypodossier/hyhatchet/hatchet-api:oidc89        (k8s / Helm)
+#   registry.gitlab.com/hypodossier/hyhatchet/hatchet-frontend:oidc89   (k8s / Helm)
+#   registry.gitlab.com/hypodossier/hyhatchet/hatchet-dashboard:oidc89  (docker-compose)
 #
-# Only the dashboard (the hatchet-api binary + frontend, which carry the OIDC
-# changes) is built here. The engine/migrate/admin images stay stock
-# ghcr.io/hatchet-dev/hatchet/...:v0.89.0.
+# The api + frontend carry the OIDC changes; the Helm chart deploys them as
+# separate components, while docker-compose uses the combined dashboard image.
+# The engine/migrate/admin images stay stock ghcr.io/hatchet-dev/hatchet/...:v0.89.0.
 
 stages: [build]
 
-build-dashboard:
+build-images:
   stage: build
   tags: [hetzner-gitlab-runner]
   image: docker:27
@@ -23,14 +25,19 @@ build-dashboard:
     DOCKER_BUILDKIT: "1"
     IMG_TAG: "oidc89"
     API_IMG: "$CI_REGISTRY_IMAGE/hatchet-api:$IMG_TAG"
+    FRONTEND_IMG: "$CI_REGISTRY_IMAGE/hatchet-frontend:$IMG_TAG"
     DASH_IMG: "$CI_REGISTRY_IMAGE/hatchet-dashboard:$IMG_TAG"
   timeout: 1h
   before_script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
   script:
-    # 1. hatchet-api binary (contains the OIDC handlers) — intermediate base
+    # 1. hatchet-api (OIDC handlers) — used by the Helm chart, and as the dashboard base
     - docker build -f build/package/servers.dockerfile --build-arg SERVER_TARGET=api -t "$API_IMG" .
-    # 2. dashboard = api binary + rebuilt frontend (OIDC button) behind nginx
+    - docker push "$API_IMG"
+    # 2. hatchet-frontend (OIDC button) — separate frontend deployment in the Helm chart
+    - docker build -f build/package/frontend.dockerfile -t "$FRONTEND_IMG" .
+    - docker push "$FRONTEND_IMG"
+    # 3. combined dashboard (api binary + frontend behind nginx) — for docker-compose
     - docker build -f build/package/dashboard.dockerfile --build-arg HATCHET_API_IMAGE="$API_IMG" -t "$DASH_IMG" .
     - docker push "$DASH_IMG"
   rules:
