@@ -83,18 +83,12 @@ func (u *UserService) upsertOIDCUserFromToken(ctx context.Context, config *serve
 		return nil, err
 	}
 
-	if config.Auth.ConfigFile.OIDC.RequireEmailVerified && !claims.EmailVerified {
-		return nil, fmt.Errorf("OIDC provider did not verify the email address")
-	}
-
-	// When email verification isn't required, the operator has explicitly chosen
-	// to trust this issuer's identities, so treat a successful login as
-	// verifying the email. Otherwise the user would be stored unverified and
-	// blocked by the application's verify-email gate.
-	emailVerified := claims.EmailVerified
-	if !config.Auth.ConfigFile.OIDC.RequireEmailVerified {
-		emailVerified = true
-	}
+	// Consistent with the Google/GitHub handlers, an unverified email is not
+	// rejected here — the user is created and the application's verify-email gate
+	// handles it. SetEmailVerified (SERVER_AUTH_SET_EMAIL_VERIFIED) auto-verifies,
+	// the same instance-wide setting other providers honor. This also covers
+	// providers that don't emit email_verified at all (e.g. Microsoft Entra ID).
+	emailVerified := claims.EmailVerified || config.Auth.ConfigFile.SetEmailVerified
 
 	expiresAt := tok.Expiry
 

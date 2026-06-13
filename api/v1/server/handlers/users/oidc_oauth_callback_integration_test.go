@@ -18,7 +18,8 @@ import (
 )
 
 // newOIDCTestConfig builds a ServerConfig wired to the in-process mock issuer +
-// the real database layer, with the production default RequireEmailVerified=true.
+// the real database layer. SetEmailVerified defaults to false (the production
+// default), so unverified emails are created but left unverified.
 func newOIDCTestConfig(t *testing.T, dbConf *database.Layer) (*server.ServerConfig, *mockOIDC) {
 	t.Helper()
 
@@ -41,9 +42,6 @@ func newOIDCTestConfig(t *testing.T, dbConf *database.Layer) (*server.ServerConf
 		Auth: server.AuthConfig{
 			OIDCProvider:    m.provider,
 			OIDCOAuthConfig: m.oauthCfg,
-			ConfigFile: server.ConfigFileAuth{
-				OIDC: server.ConfigFileAuthOIDC{RequireEmailVerified: true},
-			},
 		},
 	}
 	return cfg, m
@@ -108,11 +106,11 @@ func TestUpsertOIDCUserFromToken(t *testing.T) {
 	})
 }
 
-// TestUpsertOIDCUserFromToken_RequireEmailVerified covers the opt-out flag: a
-// token whose ID token does not assert a verified email (as Microsoft Entra ID
-// emits by default) is rejected when RequireEmailVerified is true (the default)
-// and accepted when it is false.
-func TestUpsertOIDCUserFromToken_RequireEmailVerified(t *testing.T) {
+// TestUpsertOIDCUserFromToken_UnverifiedEmail covers a provider that does not
+// assert a verified email (e.g. Microsoft Entra ID). The login is never rejected
+// (matching Google/GitHub); SetEmailVerified controls whether the stored user is
+// verified or left for the application's verify-email gate.
+func TestUpsertOIDCUserFromToken_UnverifiedEmail(t *testing.T) {
 	_ = os.Setenv("SERVER_MSGQUEUE_RABBITMQ_URL", "amqp://user:password@localhost:5672/")
 
 	testutils.RunTestWithDatabase(t, func(dbConf *database.Layer) error {
@@ -120,29 +118,32 @@ func TestUpsertOIDCUserFromToken_RequireEmailVerified(t *testing.T) {
 		us := NewUserService(cfg)
 		ctx := context.Background()
 
-		email := uniqueEmail(t, "entra")
-		tok := m.token(t, idTokenClaims{
-			Subject: "entra-sub", Email: email, EmailVerified: false, Name: "Bob Example",
+		// SetEmailVerified=false (default): the user is created but left
+		// unverified (the verify-email gate then applies) — not rejected.
+		gatedEmail := uniqueEmail(t, "entra-gated")
+		gatedTok := m.token(t, idTokenClaims{
+			Subject: "entra-sub-1", Email: gatedEmail, EmailVerified: false, Name: "Bob Example",
 		})
-
-		// Default (RequireEmailVerified=true): unverified email is rejected.
-		if _, err := us.upsertOIDCUserFromToken(ctx, cfg, tok); err == nil {
-			t.Fatal("expected rejection for unverified email when RequireEmailVerified=true")
-		}
-
-		// Opt out (e.g. for a trusted single-tenant Entra issuer): accepted, and
-		// the user is stored as verified so the app's verify-email gate doesn't
-		// block them.
-		cfg.Auth.ConfigFile.OIDC.RequireEmailVerified = false
-		user, err := us.upsertOIDCUserFromToken(ctx, cfg, tok)
+		gated, err := us.upsertOIDCUserFromToken(ctx, cfg, gatedTok)
 		if err != nil {
-			t.Fatalf("expected success with RequireEmailVerified=false: %v", err)
+			t.Fatalf("unverified email should be created, not rejected: %v", err)
 		}
-		if user.Email != email {
-			t.Fatalf("created user email = %q, want %q", user.Email, email)
+		if gated.EmailVerified {
+			t.Fatal("with SetEmailVerified=false an unverified email should stay unverified")
 		}
-		if !user.EmailVerified {
-			t.Fatal("with RequireEmailVerified=false the user should be stored as verified")
+
+		// SetEmailVerified=true: the same flow auto-verifies the user.
+		cfg.Auth.ConfigFile.SetEmailVerified = true
+		autoEmail := uniqueEmail(t, "entra-auto")
+		autoTok := m.token(t, idTokenClaims{
+			Subject: "entra-sub-2", Email: autoEmail, EmailVerified: false, Name: "Carol Example",
+		})
+		auto, err := us.upsertOIDCUserFromToken(ctx, cfg, autoTok)
+		if err != nil {
+			t.Fatalf("upsert with SetEmailVerified=true failed: %v", err)
+		}
+		if !auto.EmailVerified {
+			t.Fatal("with SetEmailVerified=true the user should be stored as verified")
 		}
 
 		return nil
