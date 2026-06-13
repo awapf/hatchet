@@ -62,7 +62,7 @@ func TestUpsertOIDCUserFromToken(t *testing.T) {
 
 		// First login: user does not exist yet -> CreateUser with provider="oidc".
 		tok := m.token(t, idTokenClaims{
-			Subject: "kc-sub-abc", Email: email, EmailVerified: true, Name: "Alice Hydata",
+			Subject: "kc-sub-abc", Email: email, EmailVerified: true, Name: "Alice Example",
 		})
 		user, err := us.upsertOIDCUserFromToken(ctx, cfg, tok)
 		if err != nil {
