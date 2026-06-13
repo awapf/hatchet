@@ -14,6 +14,7 @@ require (
 	github.com/charmbracelet/log v1.0.0
 	github.com/cockroachdb/errors v1.12.0
 	github.com/containerd/errdefs v1.0.0
+	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/creasty/defaults v1.8.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.7.0
@@ -121,7 +122,6 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect
-	github.com/coreos/go-oidc/v3 v3.18.0 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-sdk/config v0.1.0-alpha013 // indirect
