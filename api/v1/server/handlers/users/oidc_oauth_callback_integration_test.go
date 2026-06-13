@@ -130,7 +130,9 @@ func TestUpsertOIDCUserFromToken_RequireEmailVerified(t *testing.T) {
 			t.Fatal("expected rejection for unverified email when RequireEmailVerified=true")
 		}
 
-		// Opt out (e.g. for a trusted single-tenant Entra issuer): accepted.
+		// Opt out (e.g. for a trusted single-tenant Entra issuer): accepted, and
+		// the user is stored as verified so the app's verify-email gate doesn't
+		// block them.
 		cfg.Auth.ConfigFile.OIDC.RequireEmailVerified = false
 		user, err := us.upsertOIDCUserFromToken(ctx, cfg, tok)
 		if err != nil {
@@ -138,6 +140,9 @@ func TestUpsertOIDCUserFromToken_RequireEmailVerified(t *testing.T) {
 		}
 		if user.Email != email {
 			t.Fatalf("created user email = %q, want %q", user.Email, email)
+		}
+		if !user.EmailVerified {
+			t.Fatal("with RequireEmailVerified=false the user should be stored as verified")
 		}
 
 		return nil

@@ -87,6 +87,15 @@ func (u *UserService) upsertOIDCUserFromToken(ctx context.Context, config *serve
 		return nil, fmt.Errorf("OIDC provider did not verify the email address")
 	}
 
+	// When email verification isn't required, the operator has explicitly chosen
+	// to trust this issuer's identities, so treat a successful login as
+	// verifying the email. Otherwise the user would be stored unverified and
+	// blocked by the application's verify-email gate.
+	emailVerified := claims.EmailVerified
+	if !config.Auth.ConfigFile.OIDC.RequireEmailVerified {
+		emailVerified = true
+	}
+
 	expiresAt := tok.Expiry
 
 	accessTokenEncrypted, err := config.Encryption.Encrypt([]byte(tok.AccessToken), "oidc_access_token")
@@ -117,7 +126,7 @@ func (u *UserService) upsertOIDCUserFromToken(ctx context.Context, config *serve
 	switch err {
 	case nil:
 		user, err = u.config.V1.User().UpdateUser(ctx, user.ID, &v1.UpdateUserOpts{
-			EmailVerified: v1.BoolPtr(claims.EmailVerified),
+			EmailVerified: v1.BoolPtr(emailVerified),
 			Name:          v1.StringPtr(claims.Name),
 			OAuth:         oauthOpts,
 		})
@@ -132,7 +141,7 @@ func (u *UserService) upsertOIDCUserFromToken(ctx context.Context, config *serve
 
 		user, err = u.config.V1.User().CreateUser(ctx, &v1.CreateUserOpts{
 			Email:         claims.Email,
-			EmailVerified: v1.BoolPtr(claims.EmailVerified),
+			EmailVerified: v1.BoolPtr(emailVerified),
 			Name:          v1.StringPtr(claims.Name),
 			OAuth:         oauthOpts,
 		})
