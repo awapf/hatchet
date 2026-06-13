@@ -520,6 +520,12 @@ type ConfigFileAuthOIDC struct {
 	// ScopesString is used to bind the SERVER_AUTH_OIDC_SCOPES env var, since
 	// direct env-to-[]string binding is unreliable without a decode hook.
 	ScopesString string `mapstructure:"scopesString" json:"scopesString,omitempty"`
+
+	// RequireEmailVerified rejects logins whose ID token does not assert a
+	// verified email. Defaults to true. Set false only for a trusted,
+	// single-tenant issuer that does not emit email_verified (e.g. Microsoft
+	// Entra ID), since disabling it means trusting the provider's email claim.
+	RequireEmailVerified bool `mapstructure:"requireEmailVerified" json:"requireEmailVerified,omitempty" default:"true"`
 }
 
 type ConfigFileAuthCookie struct {
@@ -879,6 +885,7 @@ func BindAllEnv(v *viper.Viper) {
 	_ = v.BindEnv("auth.oidc.issuerURL", "SERVER_AUTH_OIDC_ISSUER_URL")
 	_ = v.BindEnv("auth.oidc.scopes", "SERVER_AUTH_OIDC_SCOPES")
 	_ = v.BindEnv("auth.oidc.scopesString", "SERVER_AUTH_OIDC_SCOPES")
+	_ = v.BindEnv("auth.oidc.requireEmailVerified", "SERVER_AUTH_OIDC_REQUIRE_EMAIL_VERIFIED")
 
 	// task queue options
 	// legacy options

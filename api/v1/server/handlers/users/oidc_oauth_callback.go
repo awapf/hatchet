@@ -83,7 +83,7 @@ func (u *UserService) upsertOIDCUserFromToken(ctx context.Context, config *serve
 		return nil, err
 	}
 
-	if !claims.EmailVerified {
+	if config.Auth.ConfigFile.OIDC.RequireEmailVerified && !claims.EmailVerified {
 		return nil, fmt.Errorf("OIDC provider did not verify the email address")
 	}
 

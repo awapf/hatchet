@@ -17,6 +17,48 @@ import (
 	"github.com/hatchet-dev/hatchet/pkg/random"
 )
 
+// newOIDCTestConfig builds a ServerConfig wired to the in-process mock issuer +
+// the real database layer, with the production default RequireEmailVerified=true.
+func newOIDCTestConfig(t *testing.T, dbConf *database.Layer) (*server.ServerConfig, *mockOIDC) {
+	t.Helper()
+
+	masterKey, privJWT, pubJWT, _, err := encryption.GenerateLocalKeys()
+	if err != nil {
+		t.Fatalf("generate local keys: %v", err)
+	}
+	enc, err := encryption.NewLocalEncryption(masterKey, privJWT, pubJWT)
+	if err != nil {
+		t.Fatalf("new local encryption: %v", err)
+	}
+
+	m := newMockOIDC(t)
+	logger := zerolog.Nop()
+	cfg := &server.ServerConfig{
+		Layer:      dbConf,
+		Encryption: enc,
+		Logger:     &logger,
+		Runtime:    server.ConfigFileRuntime{AllowSignup: true, ServerURL: "http://localhost:8080"},
+		Auth: server.AuthConfig{
+			OIDCProvider:    m.provider,
+			OIDCOAuthConfig: m.oauthCfg,
+			ConfigFile: server.ConfigFileAuth{
+				OIDC: server.ConfigFileAuthOIDC{RequireEmailVerified: true},
+			},
+		},
+	}
+	return cfg, m
+}
+
+func uniqueEmail(t *testing.T, prefix string) string {
+	t.Helper()
+	suffix, err := random.Generate(8)
+	if err != nil {
+		t.Fatalf("random suffix: %v", err)
+	}
+	// CreateUser stores emails lowercased, so use a lowercase address.
+	return strings.ToLower(prefix + "-" + suffix + "@example.com")
+}
+
 // TestUpsertOIDCUserFromToken exercises the full OIDC upsert against a real
 // database: verify the ID token, then create (and on a second login, update) the
 // Hatchet user + OAuth link. This is the path where OAuthOpts.Provider="oidc"
@@ -28,37 +70,11 @@ func TestUpsertOIDCUserFromToken(t *testing.T) {
 	_ = os.Setenv("SERVER_MSGQUEUE_RABBITMQ_URL", "amqp://user:password@localhost:5672/")
 
 	testutils.RunTestWithDatabase(t, func(dbConf *database.Layer) error {
-		masterKey, privJWT, pubJWT, _, err := encryption.GenerateLocalKeys()
-		if err != nil {
-			t.Fatalf("generate local keys: %v", err)
-		}
-		enc, err := encryption.NewLocalEncryption(masterKey, privJWT, pubJWT)
-		if err != nil {
-			t.Fatalf("new local encryption: %v", err)
-		}
-
-		m := newMockOIDC(t)
-		logger := zerolog.Nop()
-		cfg := &server.ServerConfig{
-			Layer:      dbConf,
-			Encryption: enc,
-			Logger:     &logger,
-			Runtime:    server.ConfigFileRuntime{AllowSignup: true, ServerURL: "http://localhost:8080"},
-			Auth: server.AuthConfig{
-				OIDCProvider:    m.provider,
-				OIDCOAuthConfig: m.oauthCfg,
-			},
-		}
+		cfg, m := newOIDCTestConfig(t, dbConf)
 		us := NewUserService(cfg)
 		ctx := context.Background()
 
-		// Unique email so the test is independent of any existing rows.
-		suffix, err := random.Generate(8)
-		if err != nil {
-			t.Fatalf("random suffix: %v", err)
-		}
-		// CreateUser stores emails lowercased, so use a lowercase address.
-		email := strings.ToLower("oidc-" + suffix + "@example.com")
+		email := uniqueEmail(t, "oidc")
 
 		// First login: user does not exist yet -> CreateUser with provider="oidc".
 		tok := m.token(t, idTokenClaims{
@@ -86,6 +102,42 @@ func TestUpsertOIDCUserFromToken(t *testing.T) {
 		}
 		if user2.ID != user.ID {
 			t.Fatalf("second login created a new user (%s) instead of updating (%s)", user2.ID, user.ID)
+		}
+
+		return nil
+	})
+}
+
+// TestUpsertOIDCUserFromToken_RequireEmailVerified covers the opt-out flag: a
+// token whose ID token does not assert a verified email (as Microsoft Entra ID
+// emits by default) is rejected when RequireEmailVerified is true (the default)
+// and accepted when it is false.
+func TestUpsertOIDCUserFromToken_RequireEmailVerified(t *testing.T) {
+	_ = os.Setenv("SERVER_MSGQUEUE_RABBITMQ_URL", "amqp://user:password@localhost:5672/")
+
+	testutils.RunTestWithDatabase(t, func(dbConf *database.Layer) error {
+		cfg, m := newOIDCTestConfig(t, dbConf)
+		us := NewUserService(cfg)
+		ctx := context.Background()
+
+		email := uniqueEmail(t, "entra")
+		tok := m.token(t, idTokenClaims{
+			Subject: "entra-sub", Email: email, EmailVerified: false, Name: "Bob Example",
+		})
+
+		// Default (RequireEmailVerified=true): unverified email is rejected.
+		if _, err := us.upsertOIDCUserFromToken(ctx, cfg, tok); err == nil {
+			t.Fatal("expected rejection for unverified email when RequireEmailVerified=true")
+		}
+
+		// Opt out (e.g. for a trusted single-tenant Entra issuer): accepted.
+		cfg.Auth.ConfigFile.OIDC.RequireEmailVerified = false
+		user, err := us.upsertOIDCUserFromToken(ctx, cfg, tok)
+		if err != nil {
+			t.Fatalf("expected success with RequireEmailVerified=false: %v", err)
+		}
+		if user.Email != email {
+			t.Fatalf("created user email = %q, want %q", user.Email, email)
 		}
 
 		return nil
